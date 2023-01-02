@@ -1,0 +1,8 @@
+[package]
+name = "c6"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+base64 = "0.20"
+thiserror = "1"
