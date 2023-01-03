@@ -16,9 +16,9 @@ fn test_record_save_load() -> Result<(), Box<dyn Error>> {
 
     let mut record = Vec::new();
     board.save_record(&mut record)?;
-    assert_eq!(record, RECORD_EXPECTED);
 
-    let board_reloaded = Board::load_record(&record[..])?;
-    assert_eq!(board, board_reloaded);
+    let board_expected = Board::load_record(RECORD_EXPECTED)?;
+    assert_eq!(board, board_expected);
+    assert_eq!(record, RECORD_EXPECTED);
     Ok(())
 }

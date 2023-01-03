@@ -2,10 +2,10 @@ use std::io::{self, prelude::*};
 
 use base64::engine::DEFAULT_ENGINE;
 
-use crate::{Board, BoardSpan, Point, SetError, Stone};
+use crate::{Board, BoardKind, Point, SetError, Stone};
 
-fn write_var_u65(vec: &mut Vec<u8>, hi_64: u64, lo_1: u8) {
-    let mut buf = [0; 10];
+fn write_var_u65(buf: &mut Vec<u8>, hi_64: u64, lo_1: u8) {
+    let mut var_buf = [0; 10];
     let mut x = hi_64;
     let mut i = 0;
 
@@ -13,14 +13,14 @@ fn write_var_u65(vec: &mut Vec<u8>, hi_64: u64, lo_1: u8) {
     x >>= 6;
 
     while x != 0 {
-        buf[i] = b | 0x80;
+        var_buf[i] = b | 0x80;
         b = (x & 0x7f) as u8;
 
         x >>= 7;
         i += 1;
     }
-    buf[i] = b;
-    vec.extend_from_slice(&buf[..=i]);
+    var_buf[i] = b;
+    buf.extend_from_slice(&var_buf[..=i]);
 }
 
 fn read_var_u65(buf: &mut &[u8]) -> Option<(u64, u8)> {
@@ -55,27 +55,69 @@ fn read_var_u65(buf: &mut &[u8]) -> Option<(u64, u8)> {
 }
 
 const HEADER_LINE: &str = "-----BEGIN CONNECT6 RECORD-----";
+const VERSION_LINE: &str = concat!(
+    "Version: ",
+    env!("CARGO_PKG_NAME"),
+    " ",
+    env!("CARGO_PKG_VERSION")
+);
 const TAIL_LINE: &str = "-----END CONNECT6 RECORD-----";
 
-fn read_line<'a, R: BufRead>(reader: &mut R, buf: &'a mut String) -> io::Result<&'a str> {
-    buf.clear();
-    reader.read_line(buf)?;
-    if buf.ends_with('\n') {
-        buf.pop();
-        if buf.ends_with('\r') {
-            buf.pop();
-        }
-    }
-    Ok(&buf[..])
+struct LineReader<R> {
+    reader: R,
+    buf: String,
 }
 
-fn parse_span(mut s: &str) -> Option<BoardSpan> {
+impl<R: BufRead> LineReader<R> {
+    fn new(reader: R) -> Self {
+        Self {
+            reader,
+            buf: String::new(),
+        }
+    }
+
+    fn read_line(&mut self) -> io::Result<Option<&str>> {
+        self.buf.clear();
+        if self.reader.read_line(&mut self.buf)? == 0 {
+            return Ok(None);
+        }
+
+        if self.buf.ends_with('\n') {
+            self.buf.pop();
+            if self.buf.ends_with('\r') {
+                self.buf.pop();
+            }
+        }
+        Ok(Some(&self.buf[..]))
+    }
+}
+
+// Stolen from OpenPGP spec:
+// https://www.rfc-editor.org/rfc/rfc4880#section-6.1
+fn crc24(bytes: &[u8]) -> u32 {
+    const CRC24_INIT: u32 = 0xb704ce;
+    const CRC24_POLY: u32 = 0x1864cfb;
+
+    let mut crc = CRC24_INIT;
+    for &b in bytes {
+        crc ^= (b as u32) << 16;
+        for _ in 0..8 {
+            crc <<= 1;
+            if crc & 0x1000000 != 0 {
+                crc ^= CRC24_POLY;
+            }
+        }
+    }
+    crc & 0xffffff
+}
+
+fn parse_kind(mut s: &str) -> Option<BoardKind> {
     if s == "Infinite" {
-        return Some(BoardSpan::Infinite);
+        return Some(BoardKind::Infinite);
     }
     s = s.strip_prefix("Rect(")?.strip_suffix(')')?;
     let (x, y) = s.split_once('*')?;
-    Some(BoardSpan::Rect(x.parse().ok()?, y.parse().ok()?))
+    Some(BoardKind::Rect(x.parse().ok()?, y.parse().ok()?))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -95,11 +137,12 @@ pub enum LoadRecordError {
 impl Board {
     pub fn save_record<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writeln!(writer, "{HEADER_LINE}")?;
-        match self.span {
-            BoardSpan::Infinite => {
+        writeln!(writer, "{VERSION_LINE}")?;
+        match self.kind {
+            BoardKind::Infinite => {
                 writeln!(writer, "Board: Infinite")?;
             }
-            BoardSpan::Rect(x, y) => {
+            BoardKind::Rect(x, y) => {
                 writeln!(writer, "Board: Rect({x}*{y})")?;
             }
         }
@@ -111,64 +154,82 @@ impl Board {
             write_var_u65(&mut buf, point.index(), stone as u8);
         }
 
-        let mut out_buf = [0; 64];
+        let mut b64_buf = [0; 64];
         for chunk in buf.chunks(48) {
-            let len = base64::encode_engine_slice(chunk, &mut out_buf, &DEFAULT_ENGINE);
-            writer.write_all(&out_buf[..len])?;
+            let len = base64::encode_engine_slice(chunk, &mut b64_buf, &DEFAULT_ENGINE);
+            writer.write_all(&b64_buf[..len])?;
             writeln!(writer)?;
         }
+
+        // OpenPGP uses BE, so we use LE here, for a change.
+        let crc = crc24(&buf).to_le_bytes();
+        base64::encode_engine_slice(&crc[..3], &mut b64_buf[1..], &DEFAULT_ENGINE);
+        b64_buf[0] = b'=';
+        b64_buf[5] = b'\n';
+        writer.write_all(&b64_buf[..6])?;
 
         writeln!(writer, "{TAIL_LINE}")
     }
 
-    pub fn load_record<R: BufRead>(mut reader: R) -> Result<Board, LoadRecordError> {
-        let mut buf = String::new();
+    pub fn load_record<R: BufRead>(reader: R) -> Result<Board, LoadRecordError> {
+        use LoadRecordError::*;
 
-        if read_line(&mut reader, &mut buf)? != HEADER_LINE {
-            return Err(LoadRecordError::Syntax("expected header line"));
+        let mut reader = LineReader::new(reader);
+
+        if reader.read_line()? != Some(HEADER_LINE) {
+            return Err(Syntax("expected header line"));
         }
 
-        let mut span = BoardSpan::Infinite;
+        let mut kind = BoardKind::Infinite;
         let mut count = None;
         loop {
-            let line = read_line(&mut reader, &mut buf)?;
+            let line = reader.read_line()?.ok_or(Syntax("unexpected EOF"))?;
+            let line = line.trim_end();
             if line.is_empty() {
                 break;
             }
 
             let (key, value) = line
                 .split_once(':')
-                .ok_or(LoadRecordError::Syntax("expected colon in header"))?;
-            let value = value.trim();
-            match key.trim() {
+                .ok_or(Syntax("expected colon in header"))?;
+            let value = value.trim_start();
+            match key {
                 "Board" => {
-                    span = parse_span(value)
-                        .ok_or(LoadRecordError::Syntax("invalid header: Board"))?;
+                    kind = parse_kind(value).ok_or(Syntax("invalid header: Board"))?;
                 }
                 "Count" => match value.parse::<usize>() {
                     Ok(res) => count = Some(res),
-                    Err(_) => return Err(LoadRecordError::Syntax("invalid header: Count")),
+                    Err(_) => return Err(Syntax("invalid header: Count")),
                 },
                 _ => {}
             }
         }
 
         let mut rec_buf = Vec::new();
+        let mut line;
         loop {
-            let line = read_line(&mut reader, &mut buf)?;
-            if line.is_empty() || line.starts_with('-') {
+            line = reader.read_line()?.ok_or(Syntax("unexpected EOF"))?;
+            if line.starts_with('=') {
                 break;
             }
-
             base64::decode_engine_vec(line, &mut rec_buf, &DEFAULT_ENGINE)?;
         }
 
-        let mut board = Board::new(span);
+        if !(line.starts_with('=') && line.len() == 5) {
+            return Err(Syntax("expected checksum"));
+        }
+        let mut crc = [0; 4];
+        base64::decode_engine_slice(&line.as_bytes()[1..5], &mut crc, &DEFAULT_ENGINE)?;
+        if u32::from_le_bytes(crc) != crc24(&rec_buf) {
+            return Err(Data("wrong checksum"));
+        }
+
+        let mut board = Board::new(kind);
         let mut rec_buf = &rec_buf[..];
         let mut actual_count = 0;
         while !rec_buf.is_empty() {
             let Some((point_i, stone_i)) = read_var_u65(&mut rec_buf) else {
-                return Err(LoadRecordError::Data("unexpected EOF"));
+                return Err(Data("malformed varint"));
             };
 
             let point = Point::from_index(point_i);
@@ -183,10 +244,9 @@ impl Board {
 
         if let Some(count) = count {
             if count != actual_count {
-                return Err(LoadRecordError::Data("count mismatch"));
+                return Err(Data("wrong count"));
             }
         }
-
         Ok(board)
     }
 }

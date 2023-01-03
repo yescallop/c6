@@ -188,17 +188,17 @@ impl RawBoard {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BoardSpan {
+pub enum BoardKind {
     #[default]
     Infinite,
     Rect(u32, u32),
 }
 
-impl BoardSpan {
-    pub fn contains(self, p: Point) -> bool {
+impl BoardKind {
+    pub fn check_bounds(self, p: Point) -> bool {
         match self {
-            BoardSpan::Infinite => true,
-            BoardSpan::Rect(x, y) => zigzag_encode(p.x) < x && zigzag_encode(p.y) < y,
+            BoardKind::Infinite => true,
+            BoardKind::Rect(x, y) => zigzag_encode(p.x) < x && zigzag_encode(p.y) < y,
         }
     }
 }
@@ -214,29 +214,29 @@ pub enum SetError {
 #[derive(Debug, Default)]
 pub struct Board {
     board: RawBoard,
-    span: BoardSpan,
+    kind: BoardKind,
     record: Vec<(Point, Stone)>,
 }
 
 impl Board {
-    pub const fn new(span: BoardSpan) -> Board {
+    pub const fn new(kind: BoardKind) -> Board {
         Board {
             board: RawBoard::new(),
-            span,
+            kind,
             record: Vec::new(),
         }
     }
 
     pub const fn new_infinite() -> Board {
-        Board::new(BoardSpan::Infinite)
+        Board::new(BoardKind::Infinite)
     }
 
     pub const fn new_square(size: u32) -> Board {
-        Board::new(BoardSpan::Rect(size, size))
+        Board::new(BoardKind::Rect(size, size))
     }
 
-    pub fn span(&self) -> BoardSpan {
-        self.span
+    pub fn kind(&self) -> BoardKind {
+        self.kind
     }
 
     pub fn count(&self) -> usize {
@@ -248,7 +248,7 @@ impl Board {
     }
 
     pub fn set(&mut self, point: Point, stone: Stone) -> Result<(), SetError> {
-        if !self.span.contains(point) {
+        if !self.kind.check_bounds(point) {
             Err(SetError::OutOfBounds)
         } else if !self.board.set(point, stone) {
             Err(SetError::Occupied)
@@ -269,7 +269,7 @@ impl Board {
 
 impl PartialEq for Board {
     fn eq(&self, other: &Board) -> bool {
-        self.span == other.span && self.record == other.record
+        self.kind == other.kind && self.record == other.record
     }
 }
 
