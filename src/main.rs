@@ -1,6 +1,6 @@
 use c6::{Board, Point, Stone};
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -58,6 +58,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Box<dyn Error>>
     let mut term_center = Point::ORIGIN;
     let mut cursor = Point::ORIGIN;
     let (mut stone, mut swap) = board.infer_turn();
+    let mut saved = true;
 
     loop {
         let cursor_msg = format!("Cursor: ({}, {})", cursor.x, cursor.y);
@@ -84,11 +85,20 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Box<dyn Error>>
         let prev_cursor = cursor;
         if let Event::Key(key) = event::read()? {
             match key.code {
-                KeyCode::Char('q') => return Ok(()),
+                KeyCode::Char('q') => {
+                    if saved {
+                        return Ok(());
+                    }
+                }
                 KeyCode::Char('s') => {
-                    board.save_record(BufWriter::new(File::create("save.c6")?))?;
+                    if let Ok(file) = File::create("save.c6") {
+                        saved = board.save_record(BufWriter::new(file)).is_ok();
+                    }
                 }
                 KeyCode::Char('c') => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        return Ok(());
+                    }
                     term_center = Point::ORIGIN;
                     cursor = Point::ORIGIN;
                 }
@@ -102,23 +112,28 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Box<dyn Error>>
                             stone = stone.opposite();
                         }
                         swap = !swap;
+                        saved = false;
                     }
                 }
                 KeyCode::Char('[') => {
                     board.unset();
                     (stone, swap) = board.infer_turn();
+                    saved = false;
                 }
                 KeyCode::Char(']') => {
                     board.reset();
                     (stone, swap) = board.infer_turn();
+                    saved = false;
                 }
                 KeyCode::Home => {
                     board.jump(0);
                     (stone, swap) = board.infer_turn();
+                    saved = false;
                 }
                 KeyCode::End => {
                     board.jump(board.total_count());
                     (stone, swap) = board.infer_turn();
+                    saved = false;
                 }
                 KeyCode::Up => cursor.y -= 1,
                 KeyCode::Left => cursor.x -= 1,
