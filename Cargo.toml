@@ -2,7 +2,10 @@
 name = "c6"
 version = "0.1.0"
 edition = "2021"
+default-run = "c6"
 
 [dependencies]
 base64 = "0.20"
+crossterm = "0.25"
+tui = "0.19"
 thiserror = "1"

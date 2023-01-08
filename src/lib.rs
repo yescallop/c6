@@ -10,7 +10,9 @@ pub struct Point {
 }
 
 impl Point {
-    pub fn new(x: i32, y: i32) -> Point {
+    pub const ORIGIN: Point = Point::new(0, 0);
+
+    pub const fn new(x: i32, y: i32) -> Point {
         Point { x, y }
     }
 
@@ -85,6 +87,15 @@ fn deinterleave(i: u64) -> (u32, u32) {
 pub enum Stone {
     Black = 0,
     White = 1,
+}
+
+impl Stone {
+    pub fn opposite(self) -> Stone {
+        match self {
+            Stone::Black => Stone::White,
+            Stone::White => Stone::Black,
+        }
+    }
 }
 
 const CHUNK_SIZE_BITS: u32 = 4;
@@ -188,17 +199,17 @@ impl RawBoard {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BoardKind {
+pub enum Bounds {
     #[default]
     Infinite,
     Rect(u32, u32),
 }
 
-impl BoardKind {
-    pub fn check_bounds(self, p: Point) -> bool {
+impl Bounds {
+    pub fn contains(self, p: Point) -> bool {
         match self {
-            BoardKind::Infinite => true,
-            BoardKind::Rect(x, y) => zigzag_encode(p.x) < x && zigzag_encode(p.y) < y,
+            Bounds::Infinite => true,
+            Bounds::Rect(x, y) => zigzag_encode(p.x) < x && zigzag_encode(p.y) < y,
         }
     }
 }
@@ -214,62 +225,124 @@ pub enum SetError {
 #[derive(Debug, Default)]
 pub struct Board {
     board: RawBoard,
-    kind: BoardKind,
+    bounds: Bounds,
     record: Vec<(Point, Stone)>,
+    index: usize,
 }
 
 impl Board {
-    pub const fn new(kind: BoardKind) -> Board {
+    pub const fn new(bounds: Bounds) -> Board {
         Board {
             board: RawBoard::new(),
-            kind,
+            bounds,
             record: Vec::new(),
+            index: 0,
         }
     }
 
     pub const fn new_infinite() -> Board {
-        Board::new(BoardKind::Infinite)
+        Board::new(Bounds::Infinite)
     }
 
     pub const fn new_square(size: u32) -> Board {
-        Board::new(BoardKind::Rect(size, size))
+        Board::new(Bounds::Rect(size, size))
     }
 
-    pub fn kind(&self) -> BoardKind {
-        self.kind
+    pub fn bounds(&self) -> Bounds {
+        self.bounds
     }
 
-    pub fn count(&self) -> usize {
+    pub fn total_count(&self) -> usize {
         self.record.len()
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.index == 0
     }
 
     pub fn get(&self, point: Point) -> Option<Stone> {
         self.board.get(point)
     }
 
+    pub fn past_record(&self) -> &[(Point, Stone)] {
+        &self.record[..self.index]
+    }
+
     pub fn set(&mut self, point: Point, stone: Stone) -> Result<(), SetError> {
-        if !self.kind.check_bounds(point) {
+        if !self.bounds.contains(point) {
             Err(SetError::OutOfBounds)
         } else if !self.board.set(point, stone) {
             Err(SetError::Occupied)
         } else {
+            self.record.truncate(self.index);
             self.record.push((point, stone));
+            self.index += 1;
             Ok(())
         }
     }
 
-    pub fn unset_last(&mut self) -> Option<(Point, Stone)> {
-        let last = self.record.pop();
-        if let Some((point, _)) = last {
-            self.board.unset(point);
+    pub fn unset(&mut self) -> Option<(Point, Stone)> {
+        if self.index == 0 {
+            return None;
         }
-        last
+        self.index -= 1;
+        let last = self.record[self.index];
+
+        self.board.unset(last.0);
+        Some(last)
+    }
+
+    pub fn reset(&mut self) -> Option<(Point, Stone)> {
+        if self.index >= self.record.len() {
+            return None;
+        }
+        let next = self.record[self.index];
+        self.index += 1;
+
+        let _ = self.board.set(next.0, next.1);
+        Some(next)
+    }
+
+    pub fn jump(&mut self, index: usize) {
+        assert!(index <= self.record.len());
+        if self.index < index {
+            for i in self.index..index {
+                let next = self.record[i];
+                let _ = self.board.set(next.0, next.1);
+            }
+        } else {
+            for i in (index..self.index).rev() {
+                let last = self.record[i];
+                self.board.unset(last.0);
+            }
+        }
+        self.index = index;
+    }
+
+    pub fn infer_turn(&self) -> (Stone, bool) {
+        if self.index == 0 {
+            (Stone::Black, true)
+        } else if self.index == 1 {
+            (self.record[0].1.opposite(), false)
+        } else {
+            let last = self.record[self.index - 1].1;
+            let last_prev = self.record[self.index - 2].1;
+            if last == last_prev {
+                (last.opposite(), false)
+            } else {
+                (last, true)
+            }
+        }
     }
 }
 
 impl PartialEq for Board {
     fn eq(&self, other: &Board) -> bool {
-        self.kind == other.kind && self.record == other.record
+        self.bounds == other.bounds && self.record[..self.index] == other.record[..other.index]
     }
 }
 

@@ -2,7 +2,7 @@ use std::io::{self, prelude::*};
 
 use base64::engine::DEFAULT_ENGINE;
 
-use crate::{Board, BoardKind, Point, SetError, Stone};
+use crate::{Board, Bounds, Point, SetError, Stone};
 
 fn write_var_u65(buf: &mut Vec<u8>, hi_64: u64, lo_1: u8) {
     let mut var_buf = [0; 10];
@@ -111,13 +111,13 @@ fn crc24(bytes: &[u8]) -> u32 {
     crc & 0xffffff
 }
 
-fn parse_kind(mut s: &str) -> Option<BoardKind> {
+fn parse_bounds(mut s: &str) -> Option<Bounds> {
     if s == "Infinite" {
-        return Some(BoardKind::Infinite);
+        return Some(Bounds::Infinite);
     }
     s = s.strip_prefix("Rect(")?.strip_suffix(')')?;
     let (x, y) = s.split_once('*')?;
-    Some(BoardKind::Rect(x.parse().ok()?, y.parse().ok()?))
+    Some(Bounds::Rect(x.parse().ok()?, y.parse().ok()?))
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -138,19 +138,19 @@ impl Board {
     pub fn save_record<W: Write>(&self, mut writer: W) -> io::Result<()> {
         writeln!(writer, "{HEADER_LINE}")?;
         writeln!(writer, "{VERSION_LINE}")?;
-        match self.kind {
-            BoardKind::Infinite => {
+        match self.bounds {
+            Bounds::Infinite => {
                 writeln!(writer, "Board: Infinite")?;
             }
-            BoardKind::Rect(x, y) => {
+            Bounds::Rect(x, y) => {
                 writeln!(writer, "Board: Rect({x}*{y})")?;
             }
         }
-        writeln!(writer, "Count: {}", self.count())?;
+        writeln!(writer, "Count: {}", self.index())?;
         writeln!(writer)?;
 
         let mut buf = Vec::new();
-        for &(point, stone) in &self.record {
+        for &(point, stone) in self.past_record() {
             write_var_u65(&mut buf, point.index(), stone as u8);
         }
 
@@ -180,7 +180,7 @@ impl Board {
             return Err(Syntax("expected header line"));
         }
 
-        let mut kind = BoardKind::Infinite;
+        let mut bounds = Bounds::Infinite;
         let mut count = None;
         loop {
             let line = reader.read_line()?.ok_or(Syntax("unexpected EOF"))?;
@@ -195,7 +195,7 @@ impl Board {
             let value = value.trim_start();
             match key {
                 "Board" => {
-                    kind = parse_kind(value).ok_or(Syntax("invalid header: Board"))?;
+                    bounds = parse_bounds(value).ok_or(Syntax("invalid header: Board"))?;
                 }
                 "Count" => match value.parse::<usize>() {
                     Ok(res) => count = Some(res),
@@ -224,7 +224,7 @@ impl Board {
             return Err(Data("wrong checksum"));
         }
 
-        let mut board = Board::new(kind);
+        let mut board = Board::new(bounds);
         let mut rec_buf = &rec_buf[..];
         let mut actual_count = 0;
         while !rec_buf.is_empty() {
