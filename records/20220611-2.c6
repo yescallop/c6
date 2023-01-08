@@ -1,0 +1,12 @@
+-----BEGIN CONNECT6 RECORD-----
+Version: c6 0.1.0
+Board: Rect(19*19)
+Count: 43
+Black: MCTS (R=256, T=15s, ponder-more-if-hesitant)
+White: Self (same-tree)
+Time: Sat, 11 Jun 2022 23:18 GMT+8
+
+AH3VAWB0H4EBpAKUAY0CtQJ4gAMZrQLMAVQ9LbwCbM0CXdQCnAIJTRyYA/kDjQGY
+AZABJYUBDKwBZRGIAUKXAoUC
+=+73B
+-----END CONNECT6 RECORD-----

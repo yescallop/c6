@@ -1,0 +1,12 @@
+-----BEGIN CONNECT6 RECORD-----
+Version: c6 0.1.0
+Board: Rect(19*19)
+Count: 65
+Black: UCT-MCTS (C=0.08, R=8, T=30s)
+White: yescallop
+Time: Wed, 21 Dec 2022 20:40 GMT+8
+
+ABEZIBIJDRx8BTEWPGlJiAKIA0FhQsgBUSmEAYIChwhxAgZTRxSIATWxAZgBjAGd
+AdkBHlo3qQJ4kAOhAk9m4AJ/gQKQAvACyQLpAoIBCmMjMoQCa01cZA==
+=dMBB
+-----END CONNECT6 RECORD-----
