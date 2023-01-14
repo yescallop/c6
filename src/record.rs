@@ -1,6 +1,6 @@
 use std::io::{self, prelude::*};
 
-use base64::engine::DEFAULT_ENGINE;
+use base64::{prelude::*, DecodeError, DecodeSliceError};
 
 use crate::{Board, Bounds, Point, SetError, Stone};
 
@@ -127,7 +127,7 @@ pub enum LoadRecordError {
     #[error("syntax error: {0}")]
     Syntax(&'static str),
     #[error("unable to decode base64: {0}")]
-    Base64(#[from] base64::DecodeError),
+    Base64(#[from] DecodeError),
     #[error("corrupted data: {0}")]
     Data(&'static str),
     #[error("unable to set on board: {0}")]
@@ -156,14 +156,16 @@ impl Board {
 
         let mut b64_buf = [0; 64];
         for chunk in buf.chunks(48) {
-            let len = base64::encode_engine_slice(chunk, &mut b64_buf, &DEFAULT_ENGINE);
+            let len = BASE64_STANDARD.encode_slice(chunk, &mut b64_buf).unwrap();
             writer.write_all(&b64_buf[..len])?;
             writeln!(writer)?;
         }
 
         // OpenPGP uses BE, so we use LE here, for a change.
         let crc = crc24(&buf).to_le_bytes();
-        base64::encode_engine_slice(&crc[..3], &mut b64_buf[1..], &DEFAULT_ENGINE);
+        BASE64_STANDARD
+            .encode_slice(&crc[..3], &mut b64_buf[1..])
+            .unwrap();
         b64_buf[0] = b'=';
         b64_buf[5] = b'\n';
         writer.write_all(&b64_buf[..6])?;
@@ -212,14 +214,20 @@ impl Board {
             if line.starts_with('=') {
                 break;
             }
-            base64::decode_engine_vec(line, &mut rec_buf, &DEFAULT_ENGINE)?;
+            BASE64_STANDARD.decode_vec(line, &mut rec_buf)?;
         }
 
         if !(line.starts_with('=') && line.len() == 5) {
             return Err(Syntax("expected checksum"));
         }
+
         let mut crc = [0; 4];
-        base64::decode_engine_slice(&line.as_bytes()[1..5], &mut crc, &DEFAULT_ENGINE)?;
+        match BASE64_STANDARD.decode_slice(&line.as_bytes()[1..5], &mut crc) {
+            Ok(_) => (),
+            Err(DecodeSliceError::DecodeError(e)) => return Err(LoadRecordError::Base64(e)),
+            Err(DecodeSliceError::OutputSliceTooSmall) => unreachable!(),
+        }
+
         if u32::from_le_bytes(crc) != crc24(&rec_buf) {
             return Err(Data("wrong checksum"));
         }
