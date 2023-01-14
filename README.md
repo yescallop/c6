@@ -28,6 +28,7 @@ Ctrl+C: Force quit.
 
 - No messages are displayed after you save a game. If you can press `Q` to quit, then it's saved. Also you can't save to a path other than `save.c6`.
 - The only way to start a game on a bounded board is to load a record file with the correct `Board` header and press `Home` (if needed).
+- There's no way to determine a win other than using your eyes.
 
 ## License
 
