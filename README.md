@@ -17,8 +17,8 @@ P: Pass.
 C: Reset the cursor to the origin.
 [: Undo last move.
 ]: Redo the next move.
-Home: Jump to the first move.
-End: Jump to the last move.
+Home: Jump to the state before the first move.
+End: Jump to the state after the last move.
 S: Save the game.
 Q: Quit if the game is saved.
 Ctrl+C: Force quit.
