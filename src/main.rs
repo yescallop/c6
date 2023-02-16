@@ -104,7 +104,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<(), Box<dyn Error>>
                 }
                 KeyCode::Char('p') => {
                     stone = stone.opposite();
-                    swap = board.is_empty();
+                    swap = false;
                 }
                 KeyCode::Char(' ') | KeyCode::Enter => {
                     if board.set(cursor, stone).is_ok() {

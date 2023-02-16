@@ -325,17 +325,19 @@ impl Board {
 
     pub fn infer_turn(&self) -> (Stone, bool) {
         if self.index == 0 {
-            (Stone::Black, true)
-        } else if self.index == 1 {
-            (self.record[0].1.opposite(), false)
+            return (Stone::Black, true);
+        }
+
+        let last = self.record[self.index - 1].1;
+        if self.index == 1 {
+            return (Stone::White, last == Stone::White);
+        }
+
+        let last_prev = self.record[self.index - 2].1;
+        if last == last_prev {
+            (last.opposite(), false)
         } else {
-            let last = self.record[self.index - 1].1;
-            let last_prev = self.record[self.index - 2].1;
-            if last == last_prev {
-                (last.opposite(), false)
-            } else {
-                (last, true)
-            }
+            (last, true)
         }
     }
 }
