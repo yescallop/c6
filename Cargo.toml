@@ -6,6 +6,6 @@ default-run = "c6"
 
 [dependencies]
 base64 = "0.21"
-crossterm = "0.25"
+crossterm = "0.27"
 tui = "0.19"
 thiserror = "1"
